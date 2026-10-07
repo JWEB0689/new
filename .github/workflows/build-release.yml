@@ -1,0 +1,99 @@
+# Builds the Muse Gadget firmware for the ESP32 CYD (ESP32-2432S028R) and
+# publishes it as a GitHub Release.
+#
+# How it works:
+#   1. Clones facebookincubator/muse-gadget-sdk at a pinned commit.
+#   2. Overlays the board-port/ tree from this repo (the CYD board support).
+#   3. Builds with ESP-IDF v6.0.1 (Docker image), injecting the SDK token
+#      from the GADGET_SDK_TOKEN repository secret (never committed).
+#   4. Packages the flash binaries + scripts into a zip and publishes a Release.
+#
+# One-time setup: add your SDK token from gadgets.muse.ai as a repository
+# secret named GADGET_SDK_TOKEN (Settings -> Secrets and variables -> Actions).
+# Then run this workflow from the Actions tab (or push a v* tag).
+
+name: Build CYD firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      sdk_ref:
+        description: 'muse-gadget-sdk commit to build (leave pinned unless the port was updated)'
+        required: false
+        default: 'b139b45064b4dcecf7bfe97e75bc7f99c10c28b6'
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone muse-gadget-sdk
+        run: |
+          git clone https://github.com/facebookincubator/muse-gadget-sdk.git sdk
+          git -C sdk checkout '${{ inputs.sdk_ref || github.ref_name }}'
+
+      - name: Apply CYD board port
+        run: cp -a board-port/. sdk/
+
+      - name: Build firmware
+        env:
+          GADGET_SDK_TOKEN: ${{ secrets.GADGET_SDK_TOKEN }}
+        run: |
+          if [ -z "$GADGET_SDK_TOKEN" ]; then
+            echo "::error::GADGET_SDK_TOKEN secret is not set. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          printf 'CONFIG_GADGET_SDK_TOKEN="%s"\n' "$GADGET_SDK_TOKEN" > /tmp/sdkconfig.token
+          cd sdk/esp32
+          idf.py -B build-cyd -DIDF_TARGET=esp32 -DSDKCONFIG="$PWD/build-cyd/sdkconfig" \
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.cyd;/tmp/sdkconfig.token" build
+          idf.py -B build-cyd -DIDF_TARGET=esp32 check-size || true
+
+      - name: Package firmware
+        run: |
+          mkdir -p pkg/muse-gadget-cyd-firmware
+          cp sdk/esp32/build-cyd/bootloader/bootloader.bin \
+             sdk/esp32/build-cyd/partition_table/partition-table.bin \
+             sdk/esp32/build-cyd/ota_data_initial.bin \
+             sdk/esp32/build-cyd/phy_init_data.bin \
+             sdk/esp32/build-cyd/muse-gadget.bin \
+             pkg/muse-gadget-cyd-firmware/
+          cp flash.sh flash.bat README.md pkg/muse-gadget-cyd-firmware/
+          chmod +x pkg/muse-gadget-cyd-firmware/flash.sh
+          cd pkg && zip -r muse-gadget-cyd-firmware.zip muse-gadget-cyd-firmware
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyd-firmware
+          path: pkg/muse-gadget-cyd-firmware.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cyd-firmware
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: CYD firmware ${{ inputs.tag || github.ref_name }}
+          body: |
+            Muse Gadget firmware for the ESP32 CYD (ESP32-2432S028R).
+
+            The zip contains the flash binaries (bootloader, partition table,
+            app), `flash.sh` / `flash.bat`, and a README with flashing and
+            pairing instructions. See the README in the repo for details.
+          files: muse-gadget-cyd-firmware.zip
