@@ -39,7 +39,7 @@ jobs:
       - name: Clone muse-gadget-sdk
         run: |
           git clone https://github.com/facebookincubator/muse-gadget-sdk.git sdk
-          git -C sdk checkout '${{ inputs.sdk_ref || github.ref_name }}'
+          git -C sdk checkout '${{ inputs.sdk_ref || 'b139b45064b4dcecf7bfe97e75bc7f99c10c28b6' }}'
 
       - name: Apply CYD board port
         run: cp -a board-port/. sdk/
@@ -48,6 +48,8 @@ jobs:
         env:
           GADGET_SDK_TOKEN: ${{ secrets.GADGET_SDK_TOKEN }}
         run: |
+          # GitHub overrides the image entrypoint, so source the IDF environment explicitly.
+          . /opt/esp/idf/export.sh
           if [ -z "$GADGET_SDK_TOKEN" ]; then
             echo "::error::GADGET_SDK_TOKEN secret is not set. Add it under Settings -> Secrets and variables -> Actions."
             exit 1
@@ -56,7 +58,6 @@ jobs:
           cd sdk/esp32
           idf.py -B build-cyd -DIDF_TARGET=esp32 -DSDKCONFIG="$PWD/build-cyd/sdkconfig" \
             -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;devices/sdkconfig.cyd;/tmp/sdkconfig.token" build
-          idf.py -B build-cyd -DIDF_TARGET=esp32 check-size || true
 
       - name: Package firmware
         run: |
