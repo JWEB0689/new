@@ -1,0 +1,77 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ESP32 CYD ("Cheap Yellow Display", ESP32-2432S028R): classic ESP32
+# (ESP32-WROOM-32, Xtensa dual core, 2.4 GHz Wi-Fi, BLE 4.2, no PSRAM),
+# 4 MB flash, 2.8 inch 320x240 ILI9341 TFT on SPI, XPT2046 resistive touch
+# (not used by the status screen), CH340 or CP210x USB-UART bridge, RGB LED
+# and speaker (not used; the display shows the status). Load last, after
+# sdkconfig.defaults (see README.md in this directory).
+#
+# Pins follow the community CYD pinout used by TFT_eSPI setups (witnessmenow):
+# TFT_MOSI=13, TFT_MISO=12, TFT_SCLK=14, TFT_CS=15, TFT_DC=2, TFT_RST tied to
+# EN, TFT_BL=21, TOUCH_CS=33.
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Status bars on the ILI9341; no status LED needed.
+CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341=y
+# Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices:
+# MuseGadget-Disp in the open-source build, HomeLink-Disp in the internal one.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# BOOT button, active low.
+CONFIG_HOMEHUB_BUTTON_GPIO=0
+
+# Signed apps without Secure Boot use the Secure Boot V2 (RSA) scheme, which
+# the ESP32 supports from chip revision 3.0 (ESP32-D0WD-V3).
+CONFIG_ESP32_REV_MIN_3=y
+
+# 4 MB flash with the CYD partition table (single factory app slot; OTA is
+# off). DIO is the safe mode for the unknown flash part on this board.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_cyd.csv"
+
+# No PSRAM. mbedtls and every PSRAM-preferred buffer fall back to internal RAM.
+CONFIG_SPIRAM=n
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=n
+# 16 KB TLS records in both directions would cost 32 KB of internal RAM per
+# connection. Servers may still send 16 KB records, so only shrink outbound.
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+
+# Release the classic Bluetooth controller memory; pairing is BLE only.
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=n
+CONFIG_BTDM_CTRL_MODE_BTDM=n
+
+# Fewer static Wi-Fi RX buffers (1.6 KB each, always resident). The RX block-ack
+# window may be at most twice the static buffer count.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_RX_BA_WIN=16
+CONFIG_ESP_WIFI_TX_BA_WIN=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+
+# The ESP32 has far less IRAM than the C5; keep lwIP and Wi-Fi hot paths in
+# flash so the image links.
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
+CONFIG_LWIP_EXTRA_IRAM_OPTIMIZATION=n
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+
+# No PSRAM: the home-network tunnel and network discovery do not fit next to
+# the control session. Only the control API to the VM is available.
+CONFIG_HOMEHUB_TUNNEL=n
