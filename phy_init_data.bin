@@ -1,2 +1,2 @@
 This file was a corrupted binary upload test (wrong byte size) and is not usable.
-The real firmware is attached to the GitHub Release on this repo.
+The real firmware is in firmware/ as base64 parts - run ./unpack.sh to restore it.

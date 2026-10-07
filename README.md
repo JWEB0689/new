@@ -1,8 +1,9 @@
 # Muse Gadget firmware for ESP32 CYD (ESP32-2432S028R)
 
-> **GitHub note:** the firmware lives in `muse-gadget-cyd-firmware.zip.b64`
-> (base64-encoded, because GitHub's uploader mangles raw binaries). Run
-> `./unpack.sh` to restore and unpack the zip, then flash as below.
+> **GitHub note:** the firmware binaries live in `firmware/` as base64 parts
+> (`muse-gadget-cyd-firmware.zip.b64.part-*`), because GitHub's uploader mangles
+> raw binaries. Run `./unpack.sh` to reassemble and unpack the zip, then flash
+> as below.
 
 Built from `facebookincubator/muse-gadget-sdk` (esp32) with a community
 board port for the Cheap Yellow Display: status shown on the 2.8" ILI9341
