@@ -45,6 +45,7 @@ jobs:
         run: cp -a board-port/. sdk/
 
       - name: Build firmware
+        shell: bash
         env:
           GADGET_SDK_TOKEN: ${{ secrets.GADGET_SDK_TOKEN }}
         run: |
@@ -52,6 +53,7 @@ jobs:
             echo "::error::GADGET_SDK_TOKEN secret is not set. Add it under Settings -> Secrets and variables -> Actions."
             exit 1
           fi
+          source "$IDF_PATH/export.sh"
           printf 'CONFIG_GADGET_SDK_TOKEN="%s"\n' "$GADGET_SDK_TOKEN" > /tmp/sdkconfig.token
           cd sdk/esp32
           idf.py -B build-cyd -DIDF_TARGET=esp32 -DSDKCONFIG="$PWD/build-cyd/sdkconfig" \
