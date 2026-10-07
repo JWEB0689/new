@@ -1,2 +1,2 @@
 This file was a corrupted binary upload test (wrong byte size) and is not usable.
-The real firmware is in firmware/ as base64 parts - run ./unpack.sh to restore it.
+The real firmware is published as a GitHub Release by the 'Build CYD firmware' workflow.

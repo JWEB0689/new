@@ -1,9 +1,17 @@
 # Muse Gadget firmware for ESP32 CYD (ESP32-2432S028R)
 
-> **GitHub note:** the firmware binaries live in `firmware/` as base64 parts
-> (`muse-gadget-cyd-firmware.zip.b64.part-*`), because GitHub's uploader mangles
-> raw binaries. Run `./unpack.sh` to reassemble and unpack the zip, then flash
-> as below.
+> **Firmware releases:** the binaries are built by the **Build CYD firmware**
+> GitHub Actions workflow (`.github/workflows/build-release.yml`). It compiles
+> the SDK plus the `board-port/` tree in the `espressif/idf:v6.0.1` container and
+> publishes a Release with `muse-gadget-cyd-firmware.zip`.
+>
+> To cut a release:
+> 1. Add your SDK token from gadgets.muse.ai as a repository secret named
+>    `GADGET_SDK_TOKEN` (Settings → Secrets and variables → Actions). The token
+>    is baked into the firmware at build time and is never committed.
+> 2. Go to Actions → **Build CYD firmware** → Run workflow, enter a tag like
+>    `v1.0.0`, and run. The workflow builds, packages, and publishes the
+>    release automatically.
 
 Built from `facebookincubator/muse-gadget-sdk` (esp32) with a community
 board port for the Cheap Yellow Display: status shown on the 2.8" ILI9341
