@@ -98,3 +98,7 @@ jobs:
             app), `flash.sh` / `flash.bat`, and a README with flashing and
             pairing instructions. See the README in the repo for details.
           files: muse-gadget-cyd-firmware.zip
+            The zip contains the flash binaries (bootloader, partition table,
+            app), `flash.sh` / `flash.bat`, and a README with flashing and
+            pairing instructions. See the README in the repo for details.
+          files: muse-gadget-cyd-firmware.zip
