@@ -1,0 +1,14 @@
+# cubic-config/cubic.yaml
+reviews:
+  custom_rules:
+    - name: No console logs
+      description: Flag console.log calls left in production code.
+      exclude_repositories:
+        - legacy-monolith
+        - "*-sandbox"
+    - name: React style guide
+      file_paths:
+        - docs/react-style-guide.md
+      only_repositories:
+        - "web-*"
+        - design-system
