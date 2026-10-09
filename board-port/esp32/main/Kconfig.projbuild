@@ -23,6 +23,15 @@ menu "ESP32 Device SDK"
             backend strings. Internal builds override this to match
             the shipping product name.
 
+    config GADGET_OWNER_NAME
+        string "Owner name shown on the status display at boot"
+        default ""
+        help
+            If non-empty, the status display shows this name as its title
+            from boot until the backend agent name arrives after
+            registration. A personal touch for one-off builds; it does not
+            affect protocol identifiers or backend strings.
+
     config GADGET_SDK_TOKEN
         string "Muse Gadgets SDK token"
         default ""

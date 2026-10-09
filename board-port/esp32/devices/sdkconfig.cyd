@@ -15,9 +15,10 @@
 # ESP32 CYD ("Cheap Yellow Display", ESP32-2432S028R): classic ESP32
 # (ESP32-WROOM-32, Xtensa dual core, 2.4 GHz Wi-Fi, BLE 4.2, no PSRAM),
 # 4 MB flash, 2.8 inch 320x240 ILI9341 TFT on SPI, XPT2046 resistive touch
-# (not used by the status screen), CH340 or CP210x USB-UART bridge, RGB LED
-# and speaker (not used; the display shows the status). Load last, after
-# sdkconfig.defaults (see README.md in this directory).
+# (tap = BOOT button: confirm pairing, reopen setup), CH340 or CP210x
+# USB-UART bridge, RGB LED (mirrors the status colour) and speaker pads
+# (not used). Load last, after sdkconfig.defaults (see README.md in this
+# directory).
 #
 # Pins follow the community CYD pinout used by TFT_eSPI setups (witnessmenow):
 # TFT_MOSI=13, TFT_MISO=12, TFT_SCLK=14, TFT_CS=15, TFT_DC=2, TFT_RST tied to
@@ -27,9 +28,11 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # Status bars on the ILI9341; no status LED needed.
 CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341=y
-# Advertise as <prefix>-Disp-XXXXXX to tell this board apart from real devices:
-# MuseGadget-Disp in the open-source build, HomeLink-Disp in the internal one.
-CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Disp"
+# Advertise as <prefix>-Jeremy-XXXXXX so the gadget is easy to spot while
+# pairing: MuseGadget-Jeremy in the open-source build.
+CONFIG_HOMEHUB_BLE_NAME_SUFFIX="-Jeremy"
+# Owner name shown on the status display at boot.
+CONFIG_GADGET_OWNER_NAME="Jeremy"
 # BOOT button, active low.
 CONFIG_HOMEHUB_BUTTON_GPIO=0
 
