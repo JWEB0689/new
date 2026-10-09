@@ -42,6 +42,10 @@
 #include "esp_lcd_panel_ops.h"
 #include "happy_anim.h"
 #include "pixel_font.h"
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+#include "button.h"
+#include "driver/ledc.h"
+#endif
 #if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
@@ -186,10 +190,11 @@ static const char *TAG = "link.led";
 #define LCD_BUF_CAPS     MALLOC_CAP_DMA
 #elif CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
 // ESP32 CYD (ESP32-2432S028R, "Cheap Yellow Display"): 2.8 inch 320x240
-// ILI9341 panel on SPI. The XPT2046 touch controller, RGB LED, speaker and
-// SD slot are not used by the status screen. Pins follow the community CYD
-// pinout used by TFT_eSPI setups: MOSI=13, MISO=12, SCLK=14, CS=15, DC=2,
-// RST tied to EN, backlight=21 (active high).
+// ILI9341 panel on SPI. The RGB LED mirrors the status colour, and a tap on
+// the XPT2046 touch controller acts like the BOOT button (confirm pairing,
+// reopen setup). The speaker pads and SD slot are not used. Pins follow the
+// community CYD pinout used by TFT_eSPI setups: MOSI=13, MISO=12, SCLK=14,
+// CS=15, DC=2, RST tied to EN, backlight=21 (active high).
 // The UI is drawn in the panel's native landscape orientation (no MADCTL
 // rotation); if your panel shows swapped red/blue, change
 // LCD_RGB_ELEMENT_ORDER below to LCD_RGB_ELEMENT_ORDER_BGR.
@@ -209,6 +214,16 @@ static const char *TAG = "link.led";
 #define LCD_DOT_MARGIN   6
 // Draw buffers are sent by SPI DMA.
 #define LCD_BUF_CAPS     MALLOC_CAP_DMA
+// Onboard RGB LED: common anode, so each channel lights when its pin is low.
+#define CYD_LED_R_GPIO   4
+#define CYD_LED_G_GPIO   16
+#define CYD_LED_B_GPIO   17
+// XPT2046 resistive touch controller on its own SPI bus (dedicated pins,
+// separate from the display bus above).
+#define CYD_TOUCH_SCLK_GPIO 25
+#define CYD_TOUCH_MOSI_GPIO 32
+#define CYD_TOUCH_MISO_GPIO 39
+#define CYD_TOUCH_CS_GPIO   33
 #endif
 
 #if CONFIG_HOMEHUB_DISPLAY
@@ -541,10 +556,140 @@ static void lcd_clear_rows(int y0, int y1) {
     }
 }
 
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+// ---- CYD extras: onboard RGB LED and touch-as-button ----
+//
+// The RGB LED is common-anode (a low pin lights the channel), so the PWM
+// duty is inverted. It mirrors whatever colour the status bars show,
+// including the breathing animations.
+#define CYD_RGB_LED_FREQ_HZ 5000
+static bool s_cyd_rgb_ready = false;
+
+static void cyd_rgb_init(void) {
+    ledc_timer_config_t timer_cfg = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_8_BIT,
+        .timer_num = LEDC_TIMER_0,
+        .freq_hz = CYD_RGB_LED_FREQ_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    if (ledc_timer_config(&timer_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "CYD RGB LED timer init failed");
+        return;
+    }
+    const int gpios[3] = {CYD_LED_R_GPIO, CYD_LED_G_GPIO, CYD_LED_B_GPIO};
+    for (int i = 0; i < 3; i++) {
+        ledc_channel_config_t ch_cfg = {
+            .gpio_num = gpios[i],
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel = (ledc_channel_t)i,
+            .timer_sel = LEDC_TIMER_0,
+            .duty = 255,  // off (active low)
+            .hpoint = 0,
+        };
+        if (ledc_channel_config(&ch_cfg) != ESP_OK) {
+            ESP_LOGE(TAG, "CYD RGB LED channel %d init failed", i);
+            return;
+        }
+    }
+    s_cyd_rgb_ready = true;
+}
+
+// rgb_t channels run 0..LCD_FULL_LEVEL; the LED is active low.
+static void cyd_rgb_set(rgb_t c) {
+    if (!s_cyd_rgb_ready) return;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0,
+                  255 - c.r * 255 / LCD_FULL_LEVEL);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1,
+                  255 - c.g * 255 / LCD_FULL_LEVEL);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2,
+                  255 - c.b * 255 / LCD_FULL_LEVEL);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+}
+
+// XPT2046 touch: a tap anywhere on the screen acts like a short press of the
+// BOOT button (confirm pairing, reopen the setup window while unpaired).
+// Touch pressure (Z1) is the detector; coordinates are not needed.
+#define CYD_TOUCH_SPI_HOST  SPI3_HOST
+#define CYD_TOUCH_CLOCK_HZ  (2 * 1000 * 1000)
+#define CYD_TOUCH_CMD_Z1    0xB0
+#define CYD_TOUCH_THRESHOLD 100
+static spi_device_handle_t s_touch = NULL;
+
+static bool cyd_touch_init(void) {
+    spi_bus_config_t bus_cfg = {
+        .sclk_io_num = CYD_TOUCH_SCLK_GPIO,
+        .mosi_io_num = CYD_TOUCH_MOSI_GPIO,
+        .miso_io_num = CYD_TOUCH_MISO_GPIO,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 8,
+    };
+    esp_err_t err = spi_bus_initialize(CYD_TOUCH_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CYD touch SPI bus init failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    spi_device_interface_config_t dev_cfg = {
+        .clock_speed_hz = CYD_TOUCH_CLOCK_HZ,
+        .mode = 0,
+        .spics_io_num = CYD_TOUCH_CS_GPIO,
+    };
+    err = spi_bus_add_device(CYD_TOUCH_SPI_HOST, &dev_cfg, &s_touch);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CYD touch device init failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+// One 12-bit pressure reading; above the threshold a finger is down.
+static uint16_t cyd_touch_z1(void) {
+    uint8_t tx[3] = {CYD_TOUCH_CMD_Z1, 0, 0};
+    uint8_t rx[3] = {0, 0, 0};
+    spi_transaction_t t = {
+        .length = 24,
+        .tx_buffer = tx,
+        .rx_buffer = rx,
+    };
+    if (spi_device_transmit(s_touch, &t) != ESP_OK) return 0;
+    return (uint16_t)(((rx[1] << 8) | rx[2]) >> 4);
+}
+
+static void cyd_touch_task(void *arg) {
+    stack_monitor_t stack = STACK_MONITOR_INIT;
+    int down_streak = 0, up_streak = 0;
+    bool down = false;
+    while (1) {
+        bool touched = cyd_touch_z1() > CYD_TOUCH_THRESHOLD;
+        if (touched) {
+            down_streak++;
+            up_streak = 0;
+        } else {
+            up_streak++;
+            down_streak = 0;
+        }
+        if (!down && down_streak >= 2) {
+            down = true;
+            button_touch_tap();
+        } else if (down && up_streak >= 2) {
+            down = false;
+        }
+        stack_monitor_poll(&stack);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+#endif
+
 static void led_hw_set_color(rgb_t c) {
     if (!s_panel) return;
     if (s_dot_drawn) lcd_draw_dot(false);
     if (s_bars_drawn && memcmp(&c, &s_bar_color, sizeof(c)) == 0) return;
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+    cyd_rgb_set(c);
+#endif
     uint16_t px = lcd_px((rgb_t){to_full_scale(c.r), to_full_scale(c.g),
                                     to_full_scale(c.b)});
     for (int i = 0; i < LCD_H_RES * LCD_BAR_ROWS; i++) s_bar_buf[i] = px;
@@ -901,6 +1046,19 @@ static bool led_hw_init(void) {
     };
     gpio_config(&bl_cfg);
     gpio_set_level(LCD_PIN_BL, 1);
+
+#if CONFIG_HOMEHUB_LED_BACKEND_CYD_ILI9341
+    // The CYD's own extras: the RGB LED mirrors the status colour, and a tap
+    // on the touch screen acts like the BOOT button.
+    cyd_rgb_init();
+    if (cyd_touch_init()) {
+        // Lower priority than the LED task so status changes are never delayed.
+        xTaskCreate(cyd_touch_task, "cyd_touch", 2560, NULL, 1, NULL);
+        ESP_LOGI(TAG, "CYD touch ready: tap the screen as the setup button");
+    } else {
+        ESP_LOGW(TAG, "CYD touch init failed — the BOOT button still works");
+    }
+#endif
 
     // Lower priority than the LED task so status changes are never delayed.
     xTaskCreate(anim_task, "lcd_anim", 2560, NULL, 1, NULL);
